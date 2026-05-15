@@ -4,34 +4,71 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Secure Chat</title>
+
 <style>
-body{font-family:Arial;background:#0b0b15;color:white;padding:20px}
+body{
+  font-family:Arial;
+  background:#0b0b15;
+  color:white;
+  padding:20px;
+}
 .container{max-width:800px;margin:auto}
 .card{background:#151520;padding:20px;border-radius:20px;margin-bottom:20px}
-input,textarea{width:100%;padding:12px;margin:8px 0;border-radius:10px;border:none;background:#1e1e2f;color:white}
-button{width:100%;padding:12px;border:none;border-radius:10px;background:#6d28d9;color:white;cursor:pointer}
-.chat-message{background:#11111a;padding:12px;border-radius:15px;margin-bottom:10px}
+input,textarea{
+  width:100%;padding:12px;margin:8px 0;
+  border-radius:10px;border:none;background:#1e1e2f;color:white
+}
+button{
+  width:100%;padding:12px;border:none;
+  border-radius:10px;background:#6d28d9;
+  color:white;cursor:pointer
+}
+.chat-message{
+  background:#11111a;padding:12px;
+  border-radius:15px;margin-bottom:10px
+}
+.small{font-size:0.8rem;opacity:0.7}
 </style>
 </head>
+
 <body>
+
 <div class="container">
+
 <div class="card">
 <h2>🔐 Secure Chat</h2>
+
+<div id="onlineUsers" class="small"></div>
+
 <input id="username" placeholder="Naam">
 <textarea id="message" placeholder="Bericht"></textarea>
 <input type="password" id="password" placeholder="Wachtwoord">
+
+<div id="typing" class="small"></div>
+
 <button onclick="sendMessage()">Verstuur</button>
 </div>
+
 <div class="card">
 <h3>💬 Chat</h3>
 <div id="chatBox"></div>
 </div>
+
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import {
+  getDatabase,
+  ref,
+  push,
+  onChildAdded,
+  onValue,
+  remove,
+  set
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
+// 🔥 Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyAOf0zOHS74vTPFlt4HMwjnCg-7FobaBk0",
   authDomain: "fir-chat-53f7d.firebaseapp.com",
@@ -42,58 +79,168 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// 🔐 crypto
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const ONE_DAY = 24*60*60*1000;
 
+const DELETE_TIME = 60*60*1000; // ⏳ 1 uur
+
+// 👤 user
+const userId = Math.random().toString(36).slice(2);
+
+// ✅ encrypt key
 async function getKey(password,salt){
  const keyMaterial=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveKey']);
- return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},keyMaterial,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+ return crypto.subtle.deriveKey(
+  {name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},
+  keyMaterial,
+  {name:'AES-GCM',length:256},
+  false,
+  ['encrypt','decrypt']
+ );
 }
 
 function b64(x){return btoa(String.fromCharCode(...new Uint8Array(x)));}
 function fromB64(x){const bin=atob(x);return Uint8Array.from(bin,c=>c.charCodeAt(0));}
 
-window.sendMessage = async ()=>{
- const u=username.value||'Gebruiker';
- const m=message.value;
- const p=password.value;
- if(!m||!p) return alert('Vul alles in');
+// ✅ verzenden
+window.sendMessage = async () => {
 
- const salt=crypto.getRandomValues(new Uint8Array(16));
- const iv=crypto.getRandomValues(new Uint8Array(12));
- const key=await getKey(p,salt);
+ const u = username.value || "Gebruiker";
+ const m = message.value;
+ const p = password.value;
 
- const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoder.encode(m));
+ if(!m || !p) return alert("Vul alles in");
 
- push(ref(db,'messages'),{user:u,salt:b64(salt),iv:b64(iv),data:b64(enc),time:Date.now()});
+ const salt = crypto.getRandomValues(new Uint8Array(16));
+ const iv = crypto.getRandomValues(new Uint8Array(12));
+ const key = await getKey(p, salt);
 
- message.value=''; password.value='';
+ const enc = await crypto.subtle.encrypt(
+  {name:"AES-GCM", iv},
+  key,
+  encoder.encode(m)
+ );
+
+ push(ref(db,"messages"),{
+  user:u,
+  salt:b64(salt),
+  iv:b64(iv),
+  data:b64(enc),
+  time:Date.now()
+ });
+
+ message.value="";
+ password.value="";
 };
 
+// ✅ chat bubbel
 function bubble(msg){
- const wrap=document.createElement('div');
- wrap.className='chat-message';
- wrap.innerHTML=`<b>${msg.user}</b><br><input type='password' placeholder='wachtwoord' class='pw'><button>Ontsleutel</button><div></div>`;
+ const wrap=document.createElement("div");
+ wrap.className="chat-message";
 
- wrap.querySelector('button').onclick=async()=>{
+ wrap.innerHTML=`
+  <b>${msg.user}</b><br>
+  <input type="password" placeholder="wachtwoord" class="pw">
+  <button>Ontsleutel</button>
+  <div></div>
+ `;
+
+ wrap.querySelector("button").onclick=async()=>{
   try{
-   const key=await getKey(wrap.querySelector('.pw').value,fromB64(msg.salt));
-   const dec=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(msg.iv)},key,fromB64(msg.data));
-   wrap.querySelector('div').innerText=decoder.decode(dec);
+   const key=await getKey(
+    wrap.querySelector(".pw").value,
+    fromB64(msg.salt)
+   );
+
+   const dec=await crypto.subtle.decrypt(
+    {name:"AES-GCM",iv:fromB64(msg.iv)},
+    key,
+    fromB64(msg.data)
+   );
+
+   wrap.querySelector("div").innerText=decoder.decode(dec);
   }catch{
-   wrap.querySelector('div').innerText='❌ Fout wachtwoord';
+   wrap.querySelector("div").innerText="❌ Fout wachtwoord";
   }
  };
 
  chatBox.prepend(wrap);
 }
 
-onChildAdded(ref(db,'messages'), snap=>{
+// ✅ realtime
+onChildAdded(ref(db,"messages"),snap=>{
  const msg=snap.val();
- if(Date.now()-msg.time > ONE_DAY) return;
+ if(Date.now()-msg.time > DELETE_TIME) return;
  bubble(msg);
 });
+
+// ✅ auto delete (ECHT verwijderen)
+onValue(ref(db,"messages"),snap=>{
+ const data=snap.val();
+ if(!data) return;
+
+ Object.entries(data).forEach(([key,msg])=>{
+  if(Date.now()-msg.time > DELETE_TIME){
+   remove(ref(db,"messages/"+key));
+  }
+ });
+});
+
+// 🟢 ONLINE
+const statusRef = ref(db,"online/"+userId);
+
+set(statusRef,{
+ name: username.value || "Gebruiker",
+ online:true
+});
+
+window.addEventListener("beforeunload",()=>{
+ set(statusRef,{online:false});
+});
+
+onValue(ref(db,"online"),snap=>{
+ const data=snap.val();
+ if(!data) return;
+
+ let list="🟢 Online: ";
+ Object.values(data).forEach(u=>{
+  if(u.online){
+   list+=(u.name||"User")+", ";
+  }
+ });
+
+ onlineUsers.innerText=list;
+});
+
+// ⌨️ TYPING
+message.addEventListener("input",()=>{
+ set(ref(db,"typing/"+userId),{
+  name:username.value||"Gebruiker",
+  typing:true
+ });
+
+ setTimeout(()=>{
+  set(ref(db,"typing/"+userId),{typing:false});
+ },2000);
+});
+
+onValue(ref(db,"typing"),snap=>{
+ const data=snap.val();
+ if(!data) return;
+
+ let txt="";
+
+ Object.values(data).forEach(u=>{
+  if(u.typing){
+   txt+=(u.name||"User")+" is typing... ";
+  }
+ });
+
+ typing.innerText=txt;
+});
+
 </script>
+
 </body>
 </html>
