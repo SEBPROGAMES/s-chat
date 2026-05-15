@@ -65,10 +65,13 @@ import {
   onChildAdded,
   onValue,
   remove,
-  set
+  set,
+  onDisconnect,
+  get,
+  child
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-// 🔥 Firebase config
+// ✅ Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyAOf0zOHS74vTPFlt4HMwjnCg-7FobaBk0",
   authDomain: "fir-chat-53f7d.firebaseapp.com",
@@ -79,165 +82,200 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// ✅ instellingen
+const DELETE_TIME = 60 * 60 * 1000;
+const userId = Math.random().toString(36).slice(2);
+
 // 🔐 crypto
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-const DELETE_TIME = 60*60*1000; // ⏳ 1 uur
+async function getKey(password, salt){
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
 
-// 👤 user
-const userId = Math.random().toString(36).slice(2);
-
-// ✅ encrypt key
-async function getKey(password,salt){
- const keyMaterial=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveKey']);
- return crypto.subtle.deriveKey(
-  {name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},
-  keyMaterial,
-  {name:'AES-GCM',length:256},
-  false,
-  ['encrypt','decrypt']
- );
+  return crypto.subtle.deriveKey(
+    { name:"PBKDF2", salt, iterations:250000, hash:"SHA-256"},
+    keyMaterial,
+    { name:"AES-GCM", length:256},
+    false,
+    ["encrypt","decrypt"]
+  );
 }
 
 function b64(x){return btoa(String.fromCharCode(...new Uint8Array(x)));}
 function fromB64(x){const bin=atob(x);return Uint8Array.from(bin,c=>c.charCodeAt(0));}
 
+// ✅ check unieke naam
+async function checkUsername(name){
+  const snapshot = await get(child(ref(db), "usernames/" + name));
+  return !snapshot.exists();
+}
+
 // ✅ verzenden
 window.sendMessage = async () => {
 
- const u = username.value || "Gebruiker";
- const m = message.value;
- const p = password.value;
+  const u = username.value.trim();
+  const m = message.value;
+  const p = password.value;
 
- if(!m || !p) return alert("Vul alles in");
+  if(!u) return alert("Voer naam in");
+  if(!m || !p) return alert("Vul alles in");
 
- const salt = crypto.getRandomValues(new Uint8Array(16));
- const iv = crypto.getRandomValues(new Uint8Array(12));
- const key = await getKey(p, salt);
+  const ok = await checkUsername(u);
+  if(!ok) return alert("Naam al in gebruik!");
 
- const enc = await crypto.subtle.encrypt(
-  {name:"AES-GCM", iv},
-  key,
-  encoder.encode(m)
- );
+  // ✅ naam claimen
+  set(ref(db,"usernames/"+u), true);
 
- push(ref(db,"messages"),{
-  user:u,
-  salt:b64(salt),
-  iv:b64(iv),
-  data:b64(enc),
-  time:Date.now()
- });
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await getKey(p, salt);
 
- message.value="";
- password.value="";
+  const enc = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv},
+    key,
+    encoder.encode(m)
+  );
+
+  push(ref(db,"messages"),{
+    user:u,
+    salt:b64(salt),
+    iv:b64(iv),
+    data:b64(enc),
+    time:Date.now()
+  });
+
+  message.value="";
+  password.value="";
 };
 
-// ✅ chat bubbel
+// ✅ bericht tonen
 function bubble(msg){
- const wrap=document.createElement("div");
- wrap.className="chat-message";
+  const wrap=document.createElement("div");
+  wrap.className="chat-message";
 
- wrap.innerHTML=`
-  <b>${msg.user}</b><br>
-  <input type="password" placeholder="wachtwoord" class="pw">
-  <button>Ontsleutel</button>
-  <div></div>
- `;
+  wrap.innerHTML=`
+    <b>${msg.user}</b><br>
+    <input type="password" placeholder="wachtwoord" class="pw">
+    <button>Ontsleutel</button>
+    <div></div>
+  `;
 
- wrap.querySelector("button").onclick=async()=>{
-  try{
-   const key=await getKey(
-    wrap.querySelector(".pw").value,
-    fromB64(msg.salt)
-   );
+  wrap.querySelector("button").onclick=async()=>{
+    try{
+      const key=await getKey(
+        wrap.querySelector(".pw").value,
+        fromB64(msg.salt)
+      );
 
-   const dec=await crypto.subtle.decrypt(
-    {name:"AES-GCM",iv:fromB64(msg.iv)},
-    key,
-    fromB64(msg.data)
-   );
+      const dec=await crypto.subtle.decrypt(
+        {name:"AES-GCM",iv:fromB64(msg.iv)},
+        key,
+        fromB64(msg.data)
+      );
 
-   wrap.querySelector("div").innerText=decoder.decode(dec);
-  }catch{
-   wrap.querySelector("div").innerText="❌ Fout wachtwoord";
-  }
- };
+      wrap.querySelector("div").innerText=decoder.decode(dec);
+    }catch{
+      wrap.querySelector("div").innerText="❌ Fout wachtwoord";
+    }
+  };
 
- chatBox.prepend(wrap);
+  chatBox.prepend(wrap);
 }
 
-// ✅ realtime
-onChildAdded(ref(db,"messages"),snap=>{
- const msg=snap.val();
- if(Date.now()-msg.time > DELETE_TIME) return;
- bubble(msg);
+// ✅ realtime berichten
+onChildAdded(ref(db,"messages"), snap=>{
+  const msg=snap.val();
+  if(Date.now()-msg.time > DELETE_TIME) return;
+  bubble(msg);
 });
 
-// ✅ auto delete (ECHT verwijderen)
-onValue(ref(db,"messages"),snap=>{
- const data=snap.val();
- if(!data) return;
+// ✅ auto delete
+onValue(ref(db,"messages"), snap=>{
+  const data=snap.val();
+  if(!data) return;
 
- Object.entries(data).forEach(([key,msg])=>{
-  if(Date.now()-msg.time > DELETE_TIME){
-   remove(ref(db,"messages/"+key));
-  }
- });
+  Object.entries(data).forEach(([key,msg])=>{
+    if(Date.now()-msg.time > DELETE_TIME){
+      remove(ref(db,"messages/"+key));
+    }
+  });
 });
 
-// 🟢 ONLINE
+// ✅ ONLINE FIX
 const statusRef = ref(db,"online/"+userId);
+const connectedRef = ref(db,".info/connected");
 
-set(statusRef,{
- name: username.value || "Gebruiker",
- online:true
-});
+function updateStatus(){
+  set(statusRef,{
+    name: username.value || "Gebruiker",
+    online:true
+  });
+}
 
-window.addEventListener("beforeunload",()=>{
- set(statusRef,{online:false});
-});
+onValue(connectedRef, snap=>{
+  if(snap.val() === true){
 
-onValue(ref(db,"online"),snap=>{
- const data=snap.val();
- if(!data) return;
+    onDisconnect(statusRef).set({ online:false });
 
- let list="🟢 Online: ";
- Object.values(data).forEach(u=>{
-  if(u.online){
-   list+=(u.name||"User")+", ";
+    // ✅ NAAM VRIJGEVEN
+    onDisconnect(ref(db,"usernames/"+username.value)).remove();
+
+    updateStatus();
   }
- });
-
- onlineUsers.innerText=list;
 });
 
-// ⌨️ TYPING
+// ✅ naam live updaten
+username.addEventListener("input", updateStatus);
+
+// ✅ online lijst
+onValue(ref(db,"online"), snap=>{
+  const data=snap.val();
+  if(!data) return;
+
+  let list="🟢 Online: ";
+
+  Object.values(data).forEach(u=>{
+    if(u.online){
+      list+=(u.name||"User")+", ";
+    }
+  });
+
+  list=list.replace(/, $/,"");
+  onlineUsers.innerText=list;
+});
+
+// ✅ typing
 message.addEventListener("input",()=>{
- set(ref(db,"typing/"+userId),{
-  name:username.value||"Gebruiker",
-  typing:true
- });
+  set(ref(db,"typing/"+userId),{
+    name: username.value || "Gebruiker",
+    typing:true
+  });
 
- setTimeout(()=>{
-  set(ref(db,"typing/"+userId),{typing:false});
- },2000);
+  setTimeout(()=>{
+    set(ref(db,"typing/"+userId),{typing:false});
+  },2000);
 });
 
-onValue(ref(db,"typing"),snap=>{
- const data=snap.val();
- if(!data) return;
+onValue(ref(db,"typing"), snap=>{
+  const data=snap.val();
+  if(!data) return;
 
- let txt="";
+  let txt="";
 
- Object.values(data).forEach(u=>{
-  if(u.typing){
-   txt+=(u.name||"User")+" is typing... ";
-  }
- });
+  Object.values(data).forEach(u=>{
+    if(u.typing){
+      txt+=(u.name||"User")+" typt... ";
+    }
+  });
 
- typing.innerText=txt;
+  typing.innerText=txt;
 });
 
 </script>
