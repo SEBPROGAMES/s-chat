@@ -6,27 +6,12 @@
 <title>Secure Chat</title>
 
 <style>
-body{
-  font-family:Arial;
-  background:#0b0b15;
-  color:white;
-  padding:20px;
-}
+body{font-family:Arial;background:#0b0b15;color:white;padding:20px}
 .container{max-width:800px;margin:auto}
 .card{background:#151520;padding:20px;border-radius:20px;margin-bottom:20px}
-input,textarea{
-  width:100%;padding:12px;margin:8px 0;
-  border-radius:10px;border:none;background:#1e1e2f;color:white
-}
-button{
-  width:100%;padding:12px;border:none;
-  border-radius:10px;background:#6d28d9;
-  color:white;cursor:pointer
-}
-.chat-message{
-  background:#11111a;padding:12px;
-  border-radius:15px;margin-bottom:10px
-}
+input,textarea{width:100%;padding:12px;margin:8px 0;border-radius:10px;border:none;background:#1e1e2f;color:white}
+button{width:100%;padding:10px;border:none;border-radius:10px;background:#6d28d9;color:white;cursor:pointer;margin-top:6px}
+.chat-message{background:#11111a;padding:12px;border-radius:15px;margin-bottom:10px}
 .small{font-size:0.8rem;opacity:0.7}
 .admin{border:3px solid red}
 </style>
@@ -60,18 +45,11 @@ button{
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getDatabase,
-  ref,
-  push,
-  onChildAdded,
-  onValue,
-  remove,
-  set,
-  onDisconnect,
-  runTransaction
+  getDatabase, ref, push, onChildAdded, onValue,
+  remove, set, onDisconnect, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-// ✅ FIREBASE CONFIG (goed)
+// ✅ Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyAOf0zOHS74vTPFlt4HMwjnCg-7FobaBk0",
   authDomain: "fir-chat-53f7d.firebaseapp.com",
@@ -85,47 +63,48 @@ const db = getDatabase(app);
 const DELETE_TIME = 60 * 60 * 1000;
 const userId = Math.random().toString(36).slice(2);
 
+// ✅ state
 let currentUsername = "";
 let isAdmin = false;
 
-// 🔑 admin login
-const ADMIN_TRIGGER = "/admin";
-const ADMIN_PASSWORD = "supergeheim";
+let lastMessageTime = 0;
+let lastMessageText = "";
 
+// 🔑 admin sleutel
+const ADMIN_TRIGGER = "/admin";
+const ADMIN_PASSWORD = "/admin";
+
+// 🔐 crypto
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// 🔐 crypto
 async function getKey(password, salt){
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-
+  const km = await crypto.subtle.importKey("raw", encoder.encode(password),"PBKDF2",false,["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name:"PBKDF2", salt, iterations:250000, hash:"SHA-256"},
-    keyMaterial,
-    { name:"AES-GCM", length:256},
+    {name:"PBKDF2",salt,iterations:250000,hash:"SHA-256"},
+    km,
+    {name:"AES-GCM",length:256},
     false,
     ["encrypt","decrypt"]
   );
 }
 
-function b64(x){return btoa(String.fromCharCode(...new Uint8Array(x)));}
-function fromB64(x){const bin=atob(x);return Uint8Array.from(bin,c=>c.charCodeAt(0));}
+const b64 = x => btoa(String.fromCharCode(...new Uint8Array(x)));
+const fromB64 = x => Uint8Array.from(atob(x),c=>c.charCodeAt(0));
 
 // ✅ username claim
 async function claimUsername(name){
-  const usernameRef = ref(db,"usernames/"+name);
+  const r = ref(db,"usernames/"+name);
 
-  const result = await runTransaction(usernameRef, current=>{
-    if(current === null) return userId;
+  const res = await runTransaction(r, c=>{
+    if(c===null) return userId;
   });
 
-  return result.committed;
+  if(res.committed){
+    onDisconnect(r).remove();
+  }
+
+  return res.committed;
 }
 
 // ✅ SEND
@@ -138,30 +117,47 @@ window.sendMessage = async () => {
   if(!u) return alert("Voer naam in");
   if(!m || !p) return alert("Vul alles in");
 
-  // ✅ admin activeren
+  // ✅ anti-spam
+  const now = Date.now();
+  if(now - lastMessageTime < 2000) return alert("Te snel!");
+  if(m === lastMessageText) return alert("Geen spam!");
+
+  lastMessageTime = now;
+  lastMessageText = m;
+
+  // ✅ admin login alleen voor X
   if(m === ADMIN_TRIGGER && p === ADMIN_PASSWORD){
+    if(u !== "X") return alert("Geen admin toegang");
     isAdmin = true;
     document.body.classList.add("admin");
-    document.body.setAttribute("data-admin","1");
-    alert("✅ Admin mode actief");
     updateDeleteButtons();
     return;
   }
 
   const ok = await claimUsername(u);
-  if(!ok && currentUsername !== u){
-    return alert("Naam al in gebruik!");
-  }
+  if(!ok && currentUsername !== u) return alert("Naam bezet");
 
   currentUsername = u;
 
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv   = crypto.getRandomValues(new Uint8Array(12));
-  const key  = await getKey(p, salt);
+  // ✅ user encrypt
+  const saltUser = crypto.getRandomValues(new Uint8Array(16));
+  const ivUser = crypto.getRandomValues(new Uint8Array(12));
+  const keyUser = await getKey(p, saltUser);
 
-  const enc = await crypto.subtle.encrypt(
-    {name:"AES-GCM", iv},
-    key,
+  const encUser = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivUser},
+    keyUser,
+    encoder.encode(m)
+  );
+
+  // ✅ admin encrypt
+  const saltAdmin = crypto.getRandomValues(new Uint8Array(16));
+  const ivAdmin = crypto.getRandomValues(new Uint8Array(12));
+  const keyAdmin = await getKey(ADMIN_PASSWORD, saltAdmin);
+
+  const encAdmin = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivAdmin},
+    keyAdmin,
     encoder.encode(m)
   );
 
@@ -169,175 +165,157 @@ window.sendMessage = async () => {
 
   set(msgRef,{
     user:u,
-    salt:b64(salt),
-    iv:b64(iv),
-    data:b64(enc),
+    saltUser:b64(saltUser),
+    ivUser:b64(ivUser),
+    dataUser:b64(encUser),
+    saltAdmin:b64(saltAdmin),
+    ivAdmin:b64(ivAdmin),
+    dataAdmin:b64(encAdmin),
     time:Date.now()
   });
 
-  message.value = "";
+  message.value="";
 };
 
 // ✅ BUBBLE
-function bubble(msg, key){
+function bubble(msg,key){
 
-  if(!msg.salt || !msg.iv || !msg.data) return;
+  if(!msg.dataUser || !msg.dataAdmin) return;
 
-  const wrap = document.createElement("div");
+  const wrap=document.createElement("div");
   wrap.className="chat-message";
 
-  const time = new Date(msg.time).toLocaleTimeString();
+  const time=new Date(msg.time).toLocaleTimeString();
 
-  wrap.innerHTML = `
-    <b>${msg.user}</b> <span class="small">(${time})</span><br>
-    <input type="password" class="pw" placeholder="wachtwoord">
-    <button class="dec">Ontsleutel</button>
-    <div></div>
+  wrap.innerHTML=`
+  <b>${msg.user}</b> <span class="small">(${time})</span><br>
+  <input type="password" class="pw" placeholder="wachtwoord">
+  <button class="dec">Ontsleutel</button>
+  <div></div>
   `;
 
-  // decrypt
-  wrap.querySelector(".dec").onclick = async () => {
+  wrap.querySelector(".dec").onclick=async()=>{
     try{
       const pw = wrap.querySelector(".pw").value;
+      let dec;
 
-      const keyCrypto = await getKey(pw, fromB64(msg.salt));
-
-      const dec = await crypto.subtle.decrypt(
-        {name:"AES-GCM", iv:fromB64(msg.iv)},
-        keyCrypto,
-        fromB64(msg.data)
-      );
+      try{
+        const keyA = await getKey(pw, fromB64(msg.saltAdmin));
+        dec = await crypto.subtle.decrypt(
+          {name:"AES-GCM",iv:fromB64(msg.ivAdmin)},
+          keyA,
+          fromB64(msg.dataAdmin)
+        );
+      }catch{
+        const keyU = await getKey(pw, fromB64(msg.saltUser));
+        dec = await crypto.subtle.decrypt(
+          {name:"AES-GCM",iv:fromB64(msg.ivUser)},
+          keyU,
+          fromB64(msg.dataUser)
+        );
+      }
 
       wrap.querySelector("div").innerText = decoder.decode(dec);
     }catch{
-      wrap.querySelector("div").innerText = "❌ Fout wachtwoord";
+      wrap.querySelector("div").innerText="❌ fout";
     }
   };
 
-  // ✅ delete knop altijd toevoegen
-  const del = document.createElement("button");
-  del.innerText = "🗑️ Verwijder";
-  del.style.display = isAdmin ? "block" : "none";
+  // ✅ delete
+  const del=document.createElement("button");
+  del.innerText="🗑️";
 
-  del.onclick = () => {
-    remove(ref(db,"messages/"+key));
+  if(!isAdmin) del.style.display="none";
+
+  del.onclick=async()=>{
+    await remove(ref(db,"messages/"+key));
+    wrap.remove();
   };
 
   wrap.appendChild(del);
 
   chatBox.prepend(wrap);
-
-  if(chatBox.children.length > 100){
-    chatBox.removeChild(chatBox.lastChild);
-  }
 }
 
-// ✅ update delete buttons als admin later actief wordt
+// ✅ update delete knoppen
 function updateDeleteButtons(){
-  document.querySelectorAll(".chat-message button:last-child").forEach(btn=>{
-    btn.style.display = "block";
+  document.querySelectorAll(".chat-message button:last-child").forEach(b=>{
+    b.style.display="block";
   });
 }
 
-// ✅ realtime messages
+// ✅ realtime
 onChildAdded(ref(db,"messages"), snap=>{
-  const msg = snap.val();
-  if(Date.now()-msg.time > DELETE_TIME) return;
-  bubble(msg, snap.key);
+  const msg=snap.val();
+  if(Date.now()-msg.time>DELETE_TIME) return;
+  bubble(msg,snap.key);
 });
 
 // ✅ auto delete
 onValue(ref(db,"messages"), snap=>{
-  const data = snap.val();
+  const data=snap.val();
   if(!data) return;
-
-  Object.entries(data).forEach(([key,msg])=>{
-    if(Date.now() - msg.time > DELETE_TIME){
-      remove(ref(db,"messages/"+key));
+  Object.entries(data).forEach(([k,m])=>{
+    if(Date.now()-m.time>DELETE_TIME){
+      remove(ref(db,"messages/"+k));
     }
   });
 });
 
-// ✅ ONLINE USERS
-const statusRef = ref(db,"online/"+userId);
-const connectedRef = ref(db,".info/connected");
+// ✅ ONLINE
+const statusRef=ref(db,"online/"+userId);
+const connectedRef=ref(db,".info/connected");
 
-function updateStatus(){
-  set(statusRef,{
-    name: username.value || "Gebruiker",
-    online:true
-  });
-}
-
-onValue(connectedRef, snap=>{
-  if(snap.val() === true){
-
-    onDisconnect(statusRef).set({ online:false });
-
-    if(currentUsername){
-      onDisconnect(ref(db,"usernames/"+currentUsername)).remove();
-    }
-
+onValue(connectedRef,s=>{
+  if(s.val()){
+    onDisconnect(statusRef).set({online:false});
     updateStatus();
   }
 });
 
-username.addEventListener("input", updateStatus);
+function updateStatus(){
+  set(statusRef,{name:username.value||"User",online:true});
+}
+username.addEventListener("input",updateStatus);
 
-onValue(ref(db,"online"), snap=>{
-  const data = snap.val();
-  if(!data) return;
-
-  let list="🟢 Online: ";
-
-  Object.values(data).forEach(u=>{
-    if(u.online){
-      list += (u.name || "User") + ", ";
-    }
+onValue(ref(db,"online"),s=>{
+  let txt="🟢 Online: ";
+  Object.values(s.val()||{}).forEach(u=>{
+    if(u.online) txt+=u.name+", ";
   });
-
-  onlineUsers.innerText = list.replace(/, $/,"");
+  onlineUsers.innerText=txt.replace(/, $/,"");
 });
 
-// ✅ TYPING
-let typingTimer;
-
+// ✅ typing
+let t;
 message.addEventListener("input",()=>{
-  clearTimeout(typingTimer);
-
-  set(ref(db,"typing/"+userId),{
-    name: username.value || "Gebruiker",
-    typing:true
-  });
-
-  typingTimer = setTimeout(()=>{
-    set(ref(db,"typing/"+userId),{typing:false});
-  },1500);
+  clearTimeout(t);
+  set(ref(db,"typing/"+userId),{name:username.value,typing:true});
+  t=setTimeout(()=>remove(ref(db,"typing/"+userId)),1500);
 });
 
-onValue(ref(db,"typing"), snap=>{
-  const data = snap.val();
-  if(!data) return;
-
-  let txt = "";
-
-  Object.values(data).forEach(u=>{
-    if(u.typing){
-      txt += (u.name || "User") + " typt... ";
-    }
+onValue(ref(db,"typing"),s=>{
+  let txt="";
+  Object.values(s.val()||{}).forEach(u=>{
+    if(u.typing) txt+=u.name+" typt... ";
   });
-
-  typing.innerText = txt;
+  typing.innerText=txt;
 });
 
-// ✅ ENTER SEND
-message.addEventListener("keydown", e=>{
-  if(e.key==="Enter" && !e.shiftKey){
+// ✅ release username
+window.addEventListener("beforeunload",()=>{
+  if(currentUsername){
+    remove(ref(db,"usernames/"+currentUsername));
+  }
+});
+
+// ✅ enter send
+message.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey){
     e.preventDefault();
     sendMessage();
   }
 });
-
 </script>
 
 </body>
