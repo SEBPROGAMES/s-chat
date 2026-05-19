@@ -72,7 +72,6 @@ let isAdmin = false;
 let lastMessageTime = 0;
 let lastMessageText = "";
 
-// 🔴 admin sleutel
 const ADMIN_TRIGGER = "/admin";
 const ADMIN_PASSWORD = "/admin";
 
@@ -100,11 +99,7 @@ async function claimUsername(name){
   const res = await runTransaction(r, c=>{
     if(c===null) return userId;
   });
-
-  if(res.committed){
-    onDisconnect(r).remove();
-  }
-
+  if(res.committed) onDisconnect(r).remove();
   return res.committed;
 }
 
@@ -118,7 +113,6 @@ window.sendMessage = async () => {
   if(!u) return alert("Naam nodig");
   if(!m || !p) return alert("Vul alles in");
 
-  // ✅ anti spam
   const now = Date.now();
   if(now - lastMessageTime < 2000) return alert("Te snel");
   if(m === lastMessageText) return alert("Geen spam");
@@ -126,7 +120,6 @@ window.sendMessage = async () => {
   lastMessageTime = now;
   lastMessageText = m;
 
-  // ✅ admin login (alleen X)
   if(m === ADMIN_TRIGGER && p === ADMIN_PASSWORD){
     if(u !== "X") return alert("Geen admin");
     isAdmin = true;
@@ -140,7 +133,6 @@ window.sendMessage = async () => {
 
   currentUsername = u;
 
-  // 🔐 user encrypt
   const saltUser = crypto.getRandomValues(new Uint8Array(16));
   const ivUser = crypto.getRandomValues(new Uint8Array(12));
   const keyUser = await getKey(p, saltUser);
@@ -150,7 +142,6 @@ window.sendMessage = async () => {
     encoder.encode(m)
   );
 
-  // 🔴 admin encrypt
   const saltAdmin = crypto.getRandomValues(new Uint8Array(16));
   const ivAdmin = crypto.getRandomValues(new Uint8Array(12));
   const keyAdmin = await getKey(ADMIN_PASSWORD, saltAdmin);
@@ -189,13 +180,12 @@ function bubble(msg,key){
 
   let timeHTML = "";
   if(isAdmin){
-    const time = new Date(msg.time).toLocaleTimeString();
-    timeHTML = `<span class="small">(${time})</span>`;
+    timeHTML = `<span class="small">(${new Date(msg.time).toLocaleTimeString()})</span>`;
   }
 
   wrap.innerHTML=`
   <b>${msg.user}</b> ${timeHTML}<br>
-  <input type="password" class="pw" placeholder="wachtwoord">
+  <input type="password" class="pw">
   <button class="dec">Ontsleutel</button>
   <div></div>
   `;
@@ -206,22 +196,20 @@ function bubble(msg,key){
       let dec;
 
       if(isAdmin && pw === ADMIN_PASSWORD){
-        const keyA = await getKey(pw, fromB64(msg.saltAdmin));
         dec = await crypto.subtle.decrypt(
           {name:"AES-GCM",iv:fromB64(msg.ivAdmin)},
-          keyA,
+          await getKey(pw, fromB64(msg.saltAdmin)),
           fromB64(msg.dataAdmin)
         );
       }else{
-        const keyU = await getKey(pw, fromB64(msg.saltUser));
         dec = await crypto.subtle.decrypt(
           {name:"AES-GCM",iv:fromB64(msg.ivUser)},
-          keyU,
+          await getKey(pw, fromB64(msg.saltUser)),
           fromB64(msg.dataUser)
         );
       }
 
-      wrap.querySelector("div").innerText = decoder.decode(dec);
+      wrap.querySelector("div").innerText=decoder.decode(dec);
     }catch{
       wrap.querySelector("div").innerText="❌ fout";
     }
@@ -240,7 +228,7 @@ function bubble(msg,key){
   chatBox.prepend(wrap);
 }
 
-// ✅ reload bij admin switch
+// ✅ reload bij admin
 function reloadMessages(){
   chatBox.innerHTML="";
   onValue(ref(db,"messages"),snap=>{
@@ -255,11 +243,10 @@ onChildAdded(ref(db,"messages"), snap=>{
   bubble(snap.val(), snap.key);
 });
 
-// ✅ auto delete 12u
+// ✅ delete na 12u
 onValue(ref(db,"messages"), snap=>{
   const data=snap.val();
   if(!data) return;
-
   Object.entries(data).forEach(([k,m])=>{
     if(Date.now()-m.time > ADMIN_VISIBLE_TIME){
       remove(ref(db,"messages/"+k));
@@ -267,7 +254,57 @@ onValue(ref(db,"messages"), snap=>{
   });
 });
 
-// ✅ typing (perfect)
+
+// ✅ ✅ ONLINE FIX (WERKT NU)
+const statusRef = ref(db,"online/"+userId);
+const connectedRef = ref(db,".info/connected");
+
+function updateStatus(){
+  const name = username.value.trim() || "Gebruiker";
+
+  set(statusRef,{
+    name:name,
+    online:true
+  });
+}
+
+onValue(connectedRef, snap=>{
+  if(snap.val() === true){
+
+    updateStatus();
+
+    onDisconnect(statusRef).set({online:false});
+    onDisconnect(ref(db,"typing/"+userId)).remove();
+  }
+});
+
+username.addEventListener("input", updateStatus);
+
+onValue(ref(db,"online"), snap=>{
+  const data = snap.val();
+
+  if(!data){
+    onlineUsers.innerText="🔴 Niemand online";
+    return;
+  }
+
+  let names=[];
+
+  Object.values(data).forEach(u=>{
+    if(u.online && u.name){
+      names.push(u.name);
+    }
+  });
+
+  if(names.length === 0){
+    onlineUsers.innerText="🔴 Niemand online";
+  }else{
+    onlineUsers.innerText="🟢 Online: "+names.join(", ");
+  }
+});
+
+
+// ✅ TYPING
 let t;
 message.addEventListener("input",()=>{
   clearTimeout(t);
@@ -277,8 +314,6 @@ message.addEventListener("input",()=>{
   });
   t=setTimeout(()=>remove(ref(db,"typing/"+userId)),1500);
 });
-
-onDisconnect(ref(db,"typing/"+userId)).remove();
 
 onValue(ref(db,"typing"),snap=>{
   const data=snap.val();
@@ -291,10 +326,18 @@ onValue(ref(db,"typing"),snap=>{
   typing.innerText=txt;
 });
 
-// ✅ username cleanup
+// ✅ username vrijgeven
 window.addEventListener("beforeunload",()=>{
   if(currentUsername){
     remove(ref(db,"usernames/"+currentUsername));
+  }
+});
+
+// enter send
+message.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey){
+    e.preventDefault();
+    sendMessage();
   }
 });
 </script>
