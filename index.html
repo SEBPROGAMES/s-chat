@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
@@ -11,48 +11,24 @@ body{
   background:#0b0b15;
   color:white;
   padding:20px;
-  margin:0; /* ✅ mobile fix */
+  margin:0;
 }
-
 .container{max-width:800px;margin:auto}
-
-.card{
-  background:#151520;
-  padding:20px;
-  border-radius:20px;
-  margin-bottom:20px
-}
-
+.card{background:#151520;padding:20px;border-radius:20px;margin-bottom:20px}
 input,textarea{
-  width:100%;
-  padding:12px;
-  margin:8px 0;
-  border-radius:10px;
-  border:none;
-  background:#1e1e2f;
-  color:white;
+  width:100%;padding:12px;margin:8px 0;
+  border-radius:10px;border:none;background:#1e1e2f;color:white
 }
-
-textarea{resize:none;} /* ✅ mobile fix */
-
+textarea{resize:none;}
 button{
-  width:100%;
-  padding:10px;
-  border:none;
-  border-radius:10px;
-  background:#6d28d9;
-  color:white;
-  cursor:pointer;
-  margin-top:6px
+  width:100%;padding:10px;border:none;
+  border-radius:10px;background:#6d28d9;
+  color:white;cursor:pointer;margin-top:6px
 }
-
 .chat-message{
-  background:#11111a;
-  padding:12px;
-  border-radius:15px;
-  margin-bottom:10px
+  background:#11111a;padding:12px;
+  border-radius:15px;margin-bottom:10px
 }
-
 .small{font-size:0.8rem;opacity:0.7}
 .admin{border:3px solid red}
 </style>
@@ -90,6 +66,7 @@ import {
   remove, set, onDisconnect, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
+// ✅ Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyAOf0zOHS74vTPFlt4HMwjnCg-7FobaBk0",
   authDomain: "fir-chat-53f7d.firebaseapp.com",
@@ -100,78 +77,100 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const USER_VISIBLE_TIME = 60*60*1000;
-const ADMIN_VISIBLE_TIME = 12*60*60*1000;
+// ✅ tijden
+const USER_VISIBLE_TIME = 60 * 60 * 1000;
+const ADMIN_VISIBLE_TIME = 12 * 60 * 60 * 1000;
+
 const userId = Math.random().toString(36).slice(2);
 
-let currentUsername="";
-let isAdmin=false;
+let currentUsername = "";
+let isAdmin = false;
 
-let lastMessageTime=0;
-let lastMessageText="";
+let lastMessageTime = 0;
+let lastMessageText = "";
 
-const ADMIN_TRIGGER="/admin";
-const ADMIN_PASSWORD="/admin";
+const ADMIN_TRIGGER = "/admin";
+const ADMIN_PASSWORD = "/admin";
 
-const encoder=new TextEncoder();
-const decoder=new TextDecoder();
+// 🔐 crypto
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
-async function getKey(p,s){
-  const km=await crypto.subtle.importKey("raw",encoder.encode(p),"PBKDF2",false,["deriveKey"]);
-  return crypto.subtle.deriveKey({name:"PBKDF2",salt:s,iterations:250000,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])
+async function getKey(password, salt){
+  const km = await crypto.subtle.importKey("raw", encoder.encode(password),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt,iterations:250000,hash:"SHA-256"},
+    km,
+    {name:"AES-GCM",length:256},
+    false,
+    ["encrypt","decrypt"]
+  );
 }
 
-const b64=x=>btoa(String.fromCharCode(...new Uint8Array(x)));
-const fromB64=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0));
+const b64 = x => btoa(String.fromCharCode(...new Uint8Array(x)));
+const fromB64 = x => Uint8Array.from(atob(x),c=>c.charCodeAt(0));
 
+// ✅ username claim
 async function claimUsername(name){
-  const r=ref(db,"usernames/"+name);
-  const res=await runTransaction(r,c=>{if(c===null)return userId});
+  const r = ref(db,"usernames/"+name);
+  const res = await runTransaction(r,c=>{
+    if(c===null) return userId;
+  });
   if(res.committed) onDisconnect(r).remove();
   return res.committed;
 }
 
 // ✅ SEND
-window.sendMessage=async()=>{
-  const u=username.value.trim();
-  const m=message.value;
-  const p=password.value;
+window.sendMessage = async () => {
 
-  if(!u||!m||!p)return alert("Vul alles");
+  const u = username.value.trim();
+  const m = message.value;
+  const p = password.value;
 
-  const now=Date.now();
-  if(now-lastMessageTime<2000)return alert("Te snel");
-  if(m===lastMessageText)return alert("Spam");
+  if(!u || !m || !p) return alert("Vul alles in");
 
-  lastMessageTime=now;
-  lastMessageText=m;
+  const now = Date.now();
+  if(now - lastMessageTime < 2000) return alert("Te snel");
+  if(m === lastMessageText) return alert("Geen spam");
 
-  if(m===ADMIN_TRIGGER&&p===ADMIN_PASSWORD){
-    if(u!=="X")return alert("Geen admin");
-    isAdmin=true;
+  lastMessageTime = now;
+  lastMessageText = m;
+
+  // ✅ admin login
+  if(m === ADMIN_TRIGGER && p === ADMIN_PASSWORD){
+    if(u !== "X") return alert("Geen admin");
+    isAdmin = true;
     document.body.classList.add("admin");
     reloadMessages();
     return;
   }
 
-  const ok=await claimUsername(u);
-  if(!ok&&currentUsername!==u)return alert("Naam bezet");
+  const ok = await claimUsername(u);
+  if(!ok && currentUsername !== u) return alert("Naam bezet");
 
-  currentUsername=u;
+  currentUsername = u;
 
-  const saltUser=crypto.getRandomValues(new Uint8Array(16));
-  const ivUser=crypto.getRandomValues(new Uint8Array(12));
-  const keyUser=await getKey(p,saltUser);
+  // encrypt user
+  const saltUser = crypto.getRandomValues(new Uint8Array(16));
+  const ivUser = crypto.getRandomValues(new Uint8Array(12));
+  const keyUser = await getKey(p, saltUser);
+  const encUser = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivUser},
+    keyUser,
+    encoder.encode(m)
+  );
 
-  const encUser=await crypto.subtle.encrypt({name:"AES-GCM",iv:ivUser},keyUser,encoder.encode(m));
+  // encrypt admin
+  const saltAdmin = crypto.getRandomValues(new Uint8Array(16));
+  const ivAdmin = crypto.getRandomValues(new Uint8Array(12));
+  const keyAdmin = await getKey(ADMIN_PASSWORD, saltAdmin);
+  const encAdmin = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivAdmin},
+    keyAdmin,
+    encoder.encode(m)
+  );
 
-  const saltAdmin=crypto.getRandomValues(new Uint8Array(16));
-  const ivAdmin=crypto.getRandomValues(new Uint8Array(12));
-  const keyAdmin=await getKey(ADMIN_PASSWORD,saltAdmin);
-
-  const encAdmin=await crypto.subtle.encrypt({name:"AES-GCM",iv:ivAdmin},keyAdmin,encoder.encode(m));
-
-  const msgRef=push(ref(db,"messages"));
+  const msgRef = push(ref(db,"messages"));
 
   set(msgRef,{
     user:u,
@@ -187,23 +186,23 @@ window.sendMessage=async()=>{
   message.value="";
 };
 
-// ✅ BUBBLE
+// ✅ bubble
 function bubble(msg,key){
 
-  const age=Date.now()-msg.time;
-  if(!isAdmin&&age>USER_VISIBLE_TIME)return;
-  if(isAdmin&&age>ADMIN_VISIBLE_TIME)return;
+  const age = Date.now() - msg.time;
+  if(!isAdmin && age > USER_VISIBLE_TIME) return;
+  if(isAdmin && age > ADMIN_VISIBLE_TIME) return;
 
   const wrap=document.createElement("div");
   wrap.className="chat-message";
 
-  let time="";
+  let timeHTML="";
   if(isAdmin){
-    time=`<span class="small">(${new Date(msg.time).toLocaleTimeString()})</span>`;
+    timeHTML=`<span class="small">(${new Date(msg.time).toLocaleTimeString()})</span>`;
   }
 
   wrap.innerHTML=`
-    <b>${msg.user}</b> ${time}<br>
+    <b>${msg.user}</b> ${timeHTML}<br>
     <input type="password" class="pw">
     <button class="dec">Ontsleutel</button>
     <div></div>
@@ -211,24 +210,24 @@ function bubble(msg,key){
 
   wrap.querySelector(".dec").onclick=async()=>{
     try{
-      const pw=wrap.querySelector(".pw").value;
+      const pw = wrap.querySelector(".pw").value;
       let dec;
 
-      if(isAdmin&&pw===ADMIN_PASSWORD){
-        dec=await crypto.subtle.decrypt(
+      if(isAdmin && pw === ADMIN_PASSWORD){
+        dec = await crypto.subtle.decrypt(
           {name:"AES-GCM",iv:fromB64(msg.ivAdmin)},
           await getKey(pw,fromB64(msg.saltAdmin)),
           fromB64(msg.dataAdmin)
         );
       }else{
-        dec=await crypto.subtle.decrypt(
+        dec = await crypto.subtle.decrypt(
           {name:"AES-GCM",iv:fromB64(msg.ivUser)},
           await getKey(pw,fromB64(msg.saltUser)),
           fromB64(msg.dataUser)
         );
       }
 
-      wrap.querySelector("div").innerText=decoder.decode(dec);
+      wrap.querySelector("div").innerText = decoder.decode(dec);
 
     }catch{
       wrap.querySelector("div").innerText="❌ fout";
@@ -247,19 +246,15 @@ function bubble(msg,key){
   wrap.appendChild(del);
   chatBox.prepend(wrap);
 
-  // ✅ auto scroll
-  chatBox.scroll({
-    top:0,
-    behavior:"smooth"
-  });
+  chatBox.scroll({top:0,behavior:"smooth"});
 }
 
-// ✅ reload
+// ✅ reload bij admin
 function reloadMessages(){
   chatBox.innerHTML="";
   onValue(ref(db,"messages"),snap=>{
     const data=snap.val();
-    if(!data)return;
+    if(!data) return;
     Object.entries(data).forEach(([k,m])=>bubble(m,k));
   });
 }
@@ -269,43 +264,48 @@ onChildAdded(ref(db,"messages"),snap=>bubble(snap.val(),snap.key));
 
 // ✅ delete na 12u
 onValue(ref(db,"messages"),snap=>{
-  Object.entries(snap.val()||{}).forEach(([k,m])=>{
-    if(Date.now()-m.time>ADMIN_VISIBLE_TIME){
+  const data=snap.val();
+  if(!data) return;
+  Object.entries(data).forEach(([k,m])=>{
+    if(Date.now()-m.time > ADMIN_VISIBLE_TIME){
       remove(ref(db,"messages/"+k));
     }
   });
 });
 
-// ✅ ✅ ONLINE FIX (stabiel + geen ghost users)
-const statusRef=ref(db,"online/"+userId);
-const connectedRef=ref(db,".info/connected");
 
-onValue(connectedRef,snap=>{
-  if(snap.val()===true){
+// ✅ ✅ PERFECT ONLINE (GEEN BUGS)
+const statusRef = ref(db,"online/"+userId);
+const connectedRef = ref(db,".info/connected");
 
-    const name=username.value.trim()||"Gebruiker";
+onValue(connectedRef,(snap)=>{
+  if(snap.val()){
+
+    const name = username.value.trim() || "Gebruiker";
 
     set(statusRef,{
       name:name,
       online:true
     });
 
-    // ✅ verwijder volledig bij disconnect (NIET false zetten!)
+    // ✅ volledig verwijderen bij disconnect (geen ghost users)
     onDisconnect(statusRef).remove();
 
-    // ✅ cleanup typing
+    // ✅ typing cleanup
     onDisconnect(ref(db,"typing/"+userId)).remove();
   }
 });
 
 username.addEventListener("input",()=>{
+  const name = username.value.trim() || "Gebruiker";
+
   set(statusRef,{
-    name:username.value.trim()||"Gebruiker",
+    name:name,
     online:true
   });
 });
 
-// ✅ online lijst
+// ✅ lijst
 onValue(ref(db,"online"),snap=>{
   const data=snap.val();
 
@@ -315,35 +315,57 @@ onValue(ref(db,"online"),snap=>{
   }
 
   const names=[];
+
   Object.values(data).forEach(u=>{
     if(u.name) names.push(u.name);
   });
 
-  onlineUsers.innerText=names.length
-    ? "🟢 Online: "+names.join(", ")
+  onlineUsers.innerText = names.length
+    ? "🟢 Online: " + names.join(", ")
     : "🔴 Niemand online";
 });
 
-// ✅ typing
-let t;
+
+// ✅ ✅ PERFECT TYPING
+let typingTimer;
+
 message.addEventListener("input",()=>{
-  clearTimeout(t);
+  clearTimeout(typingTimer);
+
+  const name = username.value.trim() || "Gebruiker";
 
   set(ref(db,"typing/"+userId),{
-    name:username.value.trim()||"Gebruiker",
+    name:name,
     typing:true
   });
 
-  t=setTimeout(()=>remove(ref(db,"typing/"+userId)),1500);
+  typingTimer = setTimeout(()=>{
+    remove(ref(db,"typing/"+userId)); // 🔥 key fix
+  },1500);
 });
 
+// ✅ cleanup bij disconnect
+onDisconnect(ref(db,"typing/"+userId)).remove();
+
+// ✅ display
 onValue(ref(db,"typing"),snap=>{
+  const data=snap.val();
+
+  if(!data){
+    typing.innerText="";
+    return;
+  }
+
   let txt="";
-  Object.values(snap.val()||{}).forEach(u=>{
-    if(u.typing) txt+=u.name+" typt... ";
+  Object.values(data).forEach(u=>{
+    if(u.typing && u.name){
+      txt+=u.name+" typt... ";
+    }
   });
+
   typing.innerText=txt;
 });
+
 
 // ✅ username cleanup
 window.addEventListener("beforeunload",()=>{
@@ -352,7 +374,7 @@ window.addEventListener("beforeunload",()=>{
   }
 });
 
-// enter send
+// ✅ enter send
 message.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey){
     e.preventDefault();
