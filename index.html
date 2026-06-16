@@ -1,4 +1,4 @@
-\<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
@@ -6,6 +6,31 @@
 <title>Secure Chat</title>
 
 <style>
+/* 🔒 Perfecte hoek-knop */
+#themeToggle{
+  position:fixed;
+  top:0;
+  right:0;
+  padding:8px 12px;
+  border-radius:0 0 0 12px;
+  background:#222;
+  color:white;
+  border:none;
+  cursor:pointer;
+  z-index:9999;
+  width:auto !important;
+  margin:0;
+  user-select:none;
+  -webkit-user-select:none;
+  touch-action:manipulation;
+}
+
+/* 🌞 LIGHT */
+body.light{ background:#f2f2f7; color:#111; }
+body.light .card{ background:#ffffff; }
+body.light input, body.light textarea{ background:#e5e5ea; color:#000; }
+body.light .chat-message{ background:#dddddd; }
+
 body{
   font-family:Arial;
   background:#0b0b15;
@@ -13,22 +38,40 @@ body{
   padding:20px;
   margin:0;
 }
+
 .container{max-width:800px;margin:auto}
 .card{background:#151520;padding:20px;border-radius:20px;margin-bottom:20px}
+
 input,textarea{
-  width:100%;padding:12px;margin:8px 0;
-  border-radius:10px;border:none;background:#1e1e2f;color:white
+  width:100%;
+  padding:12px;
+  margin:8px 0;
+  border-radius:10px;
+  border:none;
+  background:#1e1e2f;
+  color:white;
 }
+
 textarea{resize:none;}
+
 button{
-  width:100%;padding:10px;border:none;
-  border-radius:10px;background:#6d28d9;
-  color:white;cursor:pointer;margin-top:6px
+  width:100%;
+  padding:10px;
+  border:none;
+  border-radius:10px;
+  background:#6d28d9;
+  color:white;
+  cursor:pointer;
+  margin-top:6px;
 }
+
 .chat-message{
-  background:#11111a;padding:12px;
-  border-radius:15px;margin-bottom:10px
+  background:#11111a;
+  padding:12px;
+  border-radius:15px;
+  margin-bottom:10px;
 }
+
 .small{font-size:0.8rem;opacity:0.7}
 .admin{border:3px solid red}
 </style>
@@ -36,11 +79,12 @@ button{
 
 <body>
 
+<button id="themeToggle">🌙</button>
+
 <div class="container">
 
 <div class="card">
 <h2>🔐 Secure Chat</h2>
-
 <div id="onlineUsers" class="small"></div>
 
 <input id="username" placeholder="Naam">
@@ -48,7 +92,6 @@ button{
 <input type="password" id="password" placeholder="Wachtwoord">
 
 <div id="typing" class="small"></div>
-
 <button onclick="sendMessage()">Verstuur</button>
 </div>
 
@@ -60,41 +103,43 @@ button{
 </div>
 
 <script type="module">
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getDatabase, ref, push, onChildAdded, onValue,
   remove, set, onDisconnect, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-// ✅ Firebase
-const firebaseConfig = {
+/* ✅ Firebase */
+const app = initializeApp({
   apiKey: "AIzaSyAOf0zOHS74vTPFlt4HMwjnCg-7FobaBk0",
   authDomain: "fir-chat-53f7d.firebaseapp.com",
   databaseURL: "https://fir-chat-53f7d-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "fir-chat-53f7d"
-};
-
-const app = initializeApp(firebaseConfig);
+});
 const db = getDatabase(app);
 
-// ✅ tijden
-const USER_VISIBLE_TIME = 60 * 60 * 1000;
-const ADMIN_VISIBLE_TIME = 12 * 60 * 60 * 1000;
-
-const userId = Math.random().toString(36).slice(2);
-
-let currentUsername = "";
-let isAdmin = false;
-
-let lastMessageTime = 0;
-let lastMessageText = "";
+/* ✅ CONSTANTEN */
+const USER_VISIBLE_TIME = 3600000;
+const ADMIN_VISIBLE_TIME = 43200000;
 
 const ADMIN_TRIGGER = "/admin";
 const ADMIN_PASSWORD = "/admin";
 
-// 🔐 crypto
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+const userId = Math.random().toString(36).slice(2);
+
+/* ✅ STATE */
+let currentUsername = "";
+let isAdmin = false;
+let lastMessageTime = 0;
+let lastMessageText = "";
+
+/* ✅ HELPERS */
+const b64 = x => btoa(String.fromCharCode(...new Uint8Array(x)));
+const fromB64 = x => Uint8Array.from(atob(x),c=>c.charCodeAt(0));
 
 async function getKey(password, salt){
   const km = await crypto.subtle.importKey("raw", encoder.encode(password),"PBKDF2",false,["deriveKey"]);
@@ -107,20 +152,15 @@ async function getKey(password, salt){
   );
 }
 
-const b64 = x => btoa(String.fromCharCode(...new Uint8Array(x)));
-const fromB64 = x => Uint8Array.from(atob(x),c=>c.charCodeAt(0));
-
-// ✅ username claim
+/* ✅ USERNAME */
 async function claimUsername(name){
   const r = ref(db,"usernames/"+name);
-  const res = await runTransaction(r,c=>{
-    if(c===null) return userId;
-  });
+  const res = await runTransaction(r,c=>c===null ? userId : undefined);
   if(res.committed) onDisconnect(r).remove();
   return res.committed;
 }
 
-// ✅ SEND
+/* ✅ SEND */
 window.sendMessage = async () => {
 
   const u = username.value.trim();
@@ -136,7 +176,7 @@ window.sendMessage = async () => {
   lastMessageTime = now;
   lastMessageText = m;
 
-  // ✅ admin login
+  /* ✅ ADMIN */
   if(m === ADMIN_TRIGGER && p === ADMIN_PASSWORD){
     if(u !== "X") return alert("Geen admin");
     isAdmin = true;
@@ -147,32 +187,27 @@ window.sendMessage = async () => {
 
   const ok = await claimUsername(u);
   if(!ok && currentUsername !== u) return alert("Naam bezet");
-
   currentUsername = u;
 
-  // encrypt user
+  /* ✅ ENCRYPT */
   const saltUser = crypto.getRandomValues(new Uint8Array(16));
   const ivUser = crypto.getRandomValues(new Uint8Array(12));
-  const keyUser = await getKey(p, saltUser);
-  const encUser = await crypto.subtle.encrypt(
-    {name:"AES-GCM",iv:ivUser},
-    keyUser,
-    encoder.encode(m)
-  );
-
-  // encrypt admin
   const saltAdmin = crypto.getRandomValues(new Uint8Array(16));
   const ivAdmin = crypto.getRandomValues(new Uint8Array(12));
-  const keyAdmin = await getKey(ADMIN_PASSWORD, saltAdmin);
-  const encAdmin = await crypto.subtle.encrypt(
-    {name:"AES-GCM",iv:ivAdmin},
-    keyAdmin,
+
+  const encUser = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivUser},
+    await getKey(p,saltUser),
     encoder.encode(m)
   );
 
-  const msgRef = push(ref(db,"messages"));
+  const encAdmin = await crypto.subtle.encrypt(
+    {name:"AES-GCM",iv:ivAdmin},
+    await getKey(ADMIN_PASSWORD,saltAdmin),
+    encoder.encode(m)
+  );
 
-  set(msgRef,{
+  set(push(ref(db,"messages")),{
     user:u,
     saltUser:b64(saltUser),
     ivUser:b64(ivUser),
@@ -186,7 +221,7 @@ window.sendMessage = async () => {
   message.value="";
 };
 
-// ✅ bubble
+/* ✅ MESSAGE UI */
 function bubble(msg,key){
 
   const age = Date.now() - msg.time;
@@ -196,13 +231,10 @@ function bubble(msg,key){
   const wrap=document.createElement("div");
   wrap.className="chat-message";
 
-  let timeHTML="";
-  if(isAdmin){
-    timeHTML=`<span class="small">(${new Date(msg.time).toLocaleTimeString()})</span>`;
-  }
-
   wrap.innerHTML=`
-    <b>${msg.user}</b> ${timeHTML}<br>
+    <b>${msg.user}</b>
+    ${isAdmin ? `<span class="small">(${new Date(msg.time).toLocaleTimeString()})</span>` : ""}
+    <br>
     <input type="password" class="pw">
     <button class="dec">Ontsleutel</button>
     <div></div>
@@ -211,24 +243,18 @@ function bubble(msg,key){
   wrap.querySelector(".dec").onclick=async()=>{
     try{
       const pw = wrap.querySelector(".pw").value;
-      let dec;
 
-      if(isAdmin && pw === ADMIN_PASSWORD){
-        dec = await crypto.subtle.decrypt(
-          {name:"AES-GCM",iv:fromB64(msg.ivAdmin)},
-          await getKey(pw,fromB64(msg.saltAdmin)),
-          fromB64(msg.dataAdmin)
-        );
-      }else{
-        dec = await crypto.subtle.decrypt(
-          {name:"AES-GCM",iv:fromB64(msg.ivUser)},
-          await getKey(pw,fromB64(msg.saltUser)),
-          fromB64(msg.dataUser)
-        );
-      }
+      const data = (isAdmin && pw === ADMIN_PASSWORD)
+        ? {iv:msg.ivAdmin,salt:msg.saltAdmin,data:msg.dataAdmin}
+        : {iv:msg.ivUser,salt:msg.saltUser,data:msg.dataUser};
+
+      const dec = await crypto.subtle.decrypt(
+        {name:"AES-GCM",iv:fromB64(data.iv)},
+        await getKey(pw,fromB64(data.salt)),
+        fromB64(data.data)
+      );
 
       wrap.querySelector("div").innerText = decoder.decode(dec);
-
     }catch{
       wrap.querySelector("div").innerText="❌ fout";
     }
@@ -245,24 +271,21 @@ function bubble(msg,key){
 
   wrap.appendChild(del);
   chatBox.prepend(wrap);
-
-  chatBox.scroll({top:0,behavior:"smooth"});
 }
 
-// ✅ reload bij admin
+/* ✅ REALTIME */
+onChildAdded(ref(db,"messages"),snap=>bubble(snap.val(),snap.key));
+
+/* ✅ ADMIN RELOAD */
 function reloadMessages(){
   chatBox.innerHTML="";
   onValue(ref(db,"messages"),snap=>{
     const data=snap.val();
-    if(!data) return;
-    Object.entries(data).forEach(([k,m])=>bubble(m,k));
+    if(data) Object.entries(data).forEach(([k,m])=>bubble(m,k));
   });
 }
 
-// ✅ realtime
-onChildAdded(ref(db,"messages"),snap=>bubble(snap.val(),snap.key));
-
-// ✅ delete na 12u
+/* ✅ AUTO DELETE */
 onValue(ref(db,"messages"),snap=>{
   const data=snap.val();
   if(!data) return;
@@ -273,115 +296,97 @@ onValue(ref(db,"messages"),snap=>{
   });
 });
 
-
-// ✅ ✅ PERFECT ONLINE (GEEN BUGS)
+/* ✅ ONLINE + TYPING (ongewijzigd logisch, maar compacter) */
 const statusRef = ref(db,"online/"+userId);
-const connectedRef = ref(db,".info/connected");
 
-onValue(connectedRef,(snap)=>{
-  if(snap.val()){
+onValue(ref(db,".info/connected"),snap=>{
+  if(!snap.val()) return;
 
-    const name = username.value.trim() || "Gebruiker";
-
-    set(statusRef,{
-      name:name,
-      online:true
-    });
-
-    // ✅ volledig verwijderen bij disconnect (geen ghost users)
-    onDisconnect(statusRef).remove();
-
-    // ✅ typing cleanup
-    onDisconnect(ref(db,"typing/"+userId)).remove();
-  }
-});
-
-username.addEventListener("input",()=>{
   const name = username.value.trim() || "Gebruiker";
+  set(statusRef,{name,online:true});
 
-  set(statusRef,{
-    name:name,
-    online:true
-  });
+  onDisconnect(statusRef).remove();
+  onDisconnect(ref(db,"typing/"+userId)).remove();
 });
 
-// ✅ lijst
+username.oninput=()=>{
+  set(statusRef,{name:username.value.trim()||"Gebruiker",online:true});
+};
+
 onValue(ref(db,"online"),snap=>{
   const data=snap.val();
+  if(!data) return onlineUsers.innerText="🔴 Niemand online";
 
-  if(!data){
-    onlineUsers.innerText="🔴 Niemand online";
-    return;
-  }
-
-  const names=[];
-
-  Object.values(data).forEach(u=>{
-    if(u.name) names.push(u.name);
-  });
-
+  const names = Object.values(data).map(u=>u.name).filter(Boolean);
   onlineUsers.innerText = names.length
     ? "🟢 Online: " + names.join(", ")
     : "🔴 Niemand online";
 });
 
-
-// ✅ ✅ PERFECT TYPING
 let typingTimer;
 
-message.addEventListener("input",()=>{
+message.oninput=()=>{
   clearTimeout(typingTimer);
 
-  const name = username.value.trim() || "Gebruiker";
-
   set(ref(db,"typing/"+userId),{
-    name:name,
+    name:username.value.trim()||"Gebruiker",
     typing:true
   });
 
-  typingTimer = setTimeout(()=>{
-    remove(ref(db,"typing/"+userId)); // 🔥 key fix
+  typingTimer=setTimeout(()=>{
+    remove(ref(db,"typing/"+userId));
   },1500);
-});
+};
 
-// ✅ cleanup bij disconnect
-onDisconnect(ref(db,"typing/"+userId)).remove();
-
-// ✅ display
 onValue(ref(db,"typing"),snap=>{
   const data=snap.val();
-
-  if(!data){
-    typing.innerText="";
-    return;
-  }
-
-  let txt="";
-  Object.values(data).forEach(u=>{
-    if(u.typing && u.name){
-      txt+=u.name+" typt... ";
-    }
-  });
-
-  typing.innerText=txt;
+  typing.innerText = data
+    ? Object.values(data)
+        .filter(u=>u.typing && u.name)
+        .map(u=>u.name+" typt...")
+        .join(" ")
+    : "";
 });
 
-
-// ✅ username cleanup
+/* ✅ CLEANUP */
 window.addEventListener("beforeunload",()=>{
   if(currentUsername){
     remove(ref(db,"usernames/"+currentUsername));
   }
 });
 
-// ✅ enter send
 message.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey){
     e.preventDefault();
     sendMessage();
   }
 });
-</script>
 
+/* 🔒🌙 THEME (LOCKED + FIXED) */
+const toggleBtn = document.getElementById("themeToggle");
+let toggleLocked = false;
+
+if(localStorage.getItem("theme")==="light"){
+  document.body.classList.add("light");
+  toggleBtn.innerText="🌞";
+}
+
+toggleBtn.onclick=()=>{
+  if(toggleLocked) return;
+  toggleLocked=true;
+
+  document.body.classList.toggle("light");
+
+  if(document.body.classList.contains("light")){
+    localStorage.setItem("theme","light");
+    toggleBtn.innerText="🌞";
+  }else{
+    localStorage.setItem("theme","dark");
+    toggleBtn.innerText="🌙";
+  }
+
+  setTimeout(()=>toggleLocked=false,300);
+};
+</script>
 </body>
 </html>
